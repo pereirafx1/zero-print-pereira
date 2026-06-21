@@ -149,35 +149,38 @@ namespace ZeroPrintIndicator
             if ((high - low) / tickSize > 5_000m)
                 return;
 
-            // ⚠ VERIFICAR ────────────────────────────────────────────────────
-            // A API de acesso ao footprint pode variar entre versões do SDK 10.
-            // Estão documentadas abaixo as abordagens mais comuns.
-            // Activar a que corresponder ao SDK instalado.
-            //
-            // API confirmada no código oficial AtasPlatform/Indicators (ClusterSearch.cs):
-            //   candle.GetPriceVolumeInfo(price) → PriceVolumeInfo (ou null se sem dados)
-            //   PriceVolumeInfo.Bid  → volume no bid (vendas agressivas)
-            //   PriceVolumeInfo.Ask  → volume no ask (compras agressivas)
-            //
-            // Zero Print = GetPriceVolumeInfo devolve null (sem registo)
-            //              OU devolve Bid == 0 E Ask == 0
+            // Passar por todos os ticks do range num único ciclo:
+            // - Conta níveis com volume (confirma que é um gráfico cluster)
+            // - Recolhe ticks candidatos a Zero Print (sem volume)
+            var candidatos = new List<decimal>();
+            bool temDadosCluster = false;
 
             for (decimal price = low; price <= high; price += tickSize)
             {
                 var pvi = candle.GetPriceVolumeInfo(price);
 
-                if (pvi == null || (pvi.Bid == 0m && pvi.Ask == 0m))
-                    _activeLines.Add((price, bar));
+                if (pvi != null && (pvi.Bid > 0m || pvi.Ask > 0m))
+                    temDadosCluster = true;
+                else
+                    candidatos.Add(price);
             }
+
+            // Só adicionar zero prints se a vela tem dados de cluster.
+            // Se GetPriceVolumeInfo devolve null para tudo, é um gráfico
+            // sem footprint (vela normal) — ignorar.
+            if (!temDadosCluster)
+                return;
+
+            foreach (var price in candidatos)
+                _activeLines.Add((price, bar));
         }
 
         // ── Rendering ─────────────────────────────────────────────────────────
 
         protected override void OnRender(RenderContext context, DrawingLayouts layout)
         {
-            if (layout != DrawingLayouts.Final)
-                return;
-
+            // Não filtrar por layout: o ATAS pode usar um valor diferente de
+            // DrawingLayouts.Final para o passo de rendering do painel de preço.
             if (_activeLines.Count == 0)
                 return;
 
