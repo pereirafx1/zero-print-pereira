@@ -6,6 +6,7 @@ using System.Drawing;
 using ATAS.Indicators;
 using OFT.Rendering.Context;
 using OFT.Rendering.Tools;
+using StockSharp.Messages;
 
 // ============================================================
 //  Zero Print Pereira
@@ -155,47 +156,38 @@ namespace ZeroPrintIndicator
             // Activar a que corresponder ao SDK instalado.
             //
             // ════════════════════════════════════════════════════════════════
-            //  ABORDAGEM  — via colecção de price levels (activa)
+            //  ATAS Platform é construído sobre StockSharp.
+            //  Os dados de footprint (cluster) estão em:
+            //    candle.VolumeProfileInfo          → CandleMessageVolumeProfile
+            //    .PriceLevels                      → IList<CandlePriceLevel>
+            //    CandlePriceLevel.BuyVolume        → volume de compras (ask side)
+            //    CandlePriceLevel.SellVolume       → volume de vendas (bid side)
+            //    CandlePriceLevel.Price            → preço do nível
             //
-            //  Obtém todos os price levels do footprint e constrói um conjunto
-            //  de preços COM volume (bid > 0 ou ask > 0).
-            //  Depois itera tick a tick do Low ao High: qualquer tick que não
-            //  esteja nesse conjunto é um Zero Print.
-            //  Esta lógica é correcta tanto se a colecção devolver TODOS os
-            //  ticks do range (incluindo zeros) como se devolver APENAS os
-            //  ticks com volume não-zero.
+            //  PriceLevels contém apenas níveis COM volume (não inclui zeros),
+            //  por isso os ticks ausentes da lista são os Zero Prints.
             // ════════════════════════════════════════════════════════════════
 
-            // ⚠ VERIFICAR: nome exacto da propriedade/método no SDK instalado.
-            // Candidatos mais prováveis (verificar via IntelliSense ou decompiler):
-            //   candle.PriceLevels
-            //   candle.GetAllPriceLevels()
-            //   candle.FootPrint          (se FootPrint for IEnumerable<PriceVolumeInfo>)
-            //   candle.Levels
-            //   candle.ClusterData
-            var levels = candle.PriceLevels;  // ⚠ VERIFICAR
+            // ⚠ VERIFICAR: se candle.VolumeProfileInfo não compilar, significa
+            // que IndicatorCandle não herda directamente de CandleMessage.
+            // Nesse caso, experimentar:
+            //   candle.Candle?.VolumeProfileInfo
+            //   (candle as CandleMessage)?.VolumeProfileInfo
+            var profile = candle.VolumeProfileInfo;  // ⚠ VERIFICAR
 
-            if (levels == null)
+            if (profile?.PriceLevels == null)
                 return;
 
-            // Conjunto de preços com pelo menos um trade (bid > 0 ou ask > 0)
+            // Construir conjunto de preços que têm volume registado
             var hasVolume = new HashSet<decimal>();
-            foreach (var pvi in levels)
-            {
-                // ⚠ VERIFICAR: nomes das propriedades em PriceVolumeInfo
-                // Bid → pvi.Bid  |  pvi.BidVolume  |  pvi.VolumeBid
-                // Ask → pvi.Ask  |  pvi.AskVolume  |  pvi.VolumeAsk
-                // Price → pvi.Price  |  pvi.Level  |  pvi.PriceLevel
-                if (pvi.Bid > 0m || pvi.Ask > 0m)
-                    hasVolume.Add(pvi.Price);  // ⚠ VERIFICAR: pvi.Price
-            }
+            foreach (var level in profile.PriceLevels)
+                hasVolume.Add(level.Price);
 
-            // Se não há nenhum tick com volume, a barra ainda não tem dados
-            // de footprint (ex: barra em formação sem trades) — não processar
+            // Se não há dados, barra ainda sem footprint — ignorar
             if (hasVolume.Count == 0)
                 return;
 
-            // Ticks no range sem volume → Zero Prints
+            // Ticks no range sem qualquer volume registado → Zero Prints
             for (decimal price = low; price <= high; price += tickSize)
             {
                 if (!hasVolume.Contains(price))

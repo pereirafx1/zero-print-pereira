@@ -43,6 +43,11 @@
       <HintPath>C:\Program Files (x86)\ATAS Platform\Utils.Common.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- StockSharp — framework base do ATAS Platform; fornece CandlePriceLevel e CandleMessageVolumeProfile -->
+    <Reference Include="StockSharp.Messages">
+      <HintPath>C:\Program Files (x86)\ATAS Platform\StockSharp.Messages.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
 </Project>
