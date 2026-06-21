@@ -68,14 +68,10 @@ namespace ZeroPrintIndicator
 
         // ── Construtor ────────────────────────────────────────────────────────
 
-        // ⚠ VERIFICAR: o parâmetro `true` na base class pode significar
-        // "isOverlay" (desenhar no painel de preço) ou "useClusters"
-        // (activar acesso ao footprint), consoante a versão do SDK 10.
-        // Ambos são desejáveis aqui.  Se o SDK usar outro mecanismo para
-        // activar dados de cluster, ajustar em conformidade.
         public ZeroPrint() : base(true)
         {
-            DenyToChangePanel = true; // força painel de preço principal
+            DenyToChangePanel = true;
+            EnableCustomDrawing = true;
         }
 
         // ── Cálculo ───────────────────────────────────────────────────────────
@@ -179,39 +175,22 @@ namespace ZeroPrintIndicator
 
         protected override void OnRender(RenderContext context, DrawingLayouts layout)
         {
-            // Não filtrar por layout: o ATAS pode usar um valor diferente de
-            // DrawingLayouts.Final para o passo de rendering do painel de preço.
             if (_activeLines.Count == 0)
                 return;
 
-            // ⚠ VERIFICAR: construtor exacto de RenderPen no SDK instalado.
-            // Possibilidades:
-            //   new RenderPen(Color color, int width)
-            //   new RenderPen(Color color, float width)
-            var pen = new RenderPen(_corLinha, _espessura); // ⚠ VERIFICAR
-
-            // RenderContext não expõe ClipRectangle directamente no SDK 10.
-            // Usamos uma largura grande (100 000 px) para linhas ilimitadas;
-            // o renderer clipa automaticamente à área visível.
-            // ⚠ VERIFICAR: se o SDK expuser context.Clip, context.Bounds ou
-            // ChartInfo.Region, substituir o valor abaixo pelo Right dessa área.
+            var pen = new RenderPen(_corLinha, _espessura);
             const int LargeRight = 100_000;
 
             foreach (var line in _activeLines)
             {
-                // ⚠ VERIFICAR: GetXByBar e GetYByPrice podem retornar int,
-                // float ou double; ajustar o cast conforme o SDK instalado.
-                int x1 = (int)ChartInfo.GetXByBar(line.OriginBar);  // ⚠ VERIFICAR
-                int y  = (int)ChartInfo.GetYByPrice(line.Price);     // ⚠ VERIFICAR
+                int x1 = (int)ChartInfo.GetXByBar(line.OriginBar, true);
+                int y  = (int)ChartInfo.GetYByPrice(line.Price, false);
 
                 int x2 = _limitarRange
-                    ? (int)ChartInfo.GetXByBar(line.OriginBar + _maxCandles) // ⚠ VERIFICAR
+                    ? (int)ChartInfo.GetXByBar(line.OriginBar + _maxCandles, false)
                     : x1 + LargeRight;
 
-                // ⚠ VERIFICAR: assinatura de DrawLine no RenderContext:
-                //   context.DrawLine(pen, x1, y, x2, y)
-                //   context.DrawLine(pen, new Point(x1, y), new Point(x2, y))
-                context.DrawLine(pen, x1, y, x2, y); // ⚠ VERIFICAR
+                context.DrawLine(pen, x1, y, x2, y);
             }
         }
     }
