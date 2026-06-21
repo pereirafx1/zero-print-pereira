@@ -6,7 +6,6 @@ using System.Drawing;
 using ATAS.Indicators;
 using OFT.Rendering.Context;
 using OFT.Rendering.Tools;
-using StockSharp.Messages;
 
 // ============================================================
 //  Zero Print Pereira
@@ -155,42 +154,19 @@ namespace ZeroPrintIndicator
             // Estão documentadas abaixo as abordagens mais comuns.
             // Activar a que corresponder ao SDK instalado.
             //
-            // ════════════════════════════════════════════════════════════════
-            //  ATAS Platform é construído sobre StockSharp.
-            //  Os dados de footprint (cluster) estão em:
-            //    candle.VolumeProfileInfo          → CandleMessageVolumeProfile
-            //    .PriceLevels                      → IList<CandlePriceLevel>
-            //    CandlePriceLevel.BuyVolume        → volume de compras (ask side)
-            //    CandlePriceLevel.SellVolume       → volume de vendas (bid side)
-            //    CandlePriceLevel.Price            → preço do nível
+            // API confirmada no código oficial AtasPlatform/Indicators (ClusterSearch.cs):
+            //   candle.GetPriceVolumeInfo(price) → PriceVolumeInfo (ou null se sem dados)
+            //   PriceVolumeInfo.Bid  → volume no bid (vendas agressivas)
+            //   PriceVolumeInfo.Ask  → volume no ask (compras agressivas)
             //
-            //  PriceLevels contém apenas níveis COM volume (não inclui zeros),
-            //  por isso os ticks ausentes da lista são os Zero Prints.
-            // ════════════════════════════════════════════════════════════════
+            // Zero Print = GetPriceVolumeInfo devolve null (sem registo)
+            //              OU devolve Bid == 0 E Ask == 0
 
-            // ⚠ VERIFICAR: se candle.VolumeProfileInfo não compilar, significa
-            // que IndicatorCandle não herda directamente de CandleMessage.
-            // Nesse caso, experimentar:
-            //   candle.Candle?.VolumeProfileInfo
-            //   (candle as CandleMessage)?.VolumeProfileInfo
-            var profile = candle.VolumeProfileInfo;  // ⚠ VERIFICAR
-
-            if (profile?.PriceLevels == null)
-                return;
-
-            // Construir conjunto de preços que têm volume registado
-            var hasVolume = new HashSet<decimal>();
-            foreach (var level in profile.PriceLevels)
-                hasVolume.Add(level.Price);
-
-            // Se não há dados, barra ainda sem footprint — ignorar
-            if (hasVolume.Count == 0)
-                return;
-
-            // Ticks no range sem qualquer volume registado → Zero Prints
             for (decimal price = low; price <= high; price += tickSize)
             {
-                if (!hasVolume.Contains(price))
+                var pvi = candle.GetPriceVolumeInfo(price);
+
+                if (pvi == null || (pvi.Bid == 0m && pvi.Ask == 0m))
                     _activeLines.Add((price, bar));
             }
         }
