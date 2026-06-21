@@ -155,71 +155,52 @@ namespace ZeroPrintIndicator
             // Activar a que corresponder ao SDK instalado.
             //
             // ════════════════════════════════════════════════════════════════
-            //  ABORDAGEM A  (activa por defeito)
-            //  Itera tick a tick do Low ao High e consulta os volumes Bid/Ask
-            //  por preço via GetVolume().
-            //  Funciona mesmo que o footprint só armazene levels com volume > 0,
-            //  porque a ausência de registo equivale a bid=0 e ask=0.
+            //  ABORDAGEM  — via colecção de price levels (activa)
+            //
+            //  Obtém todos os price levels do footprint e constrói um conjunto
+            //  de preços COM volume (bid > 0 ou ask > 0).
+            //  Depois itera tick a tick do Low ao High: qualquer tick que não
+            //  esteja nesse conjunto é um Zero Print.
+            //  Esta lógica é correcta tanto se a colecção devolver TODOS os
+            //  ticks do range (incluindo zeros) como se devolver APENAS os
+            //  ticks com volume não-zero.
             // ════════════════════════════════════════════════════════════════
 
-            for (decimal price = low; price <= high; price += tickSize)
+            // ⚠ VERIFICAR: nome exacto da propriedade/método no SDK instalado.
+            // Candidatos mais prováveis (verificar via IntelliSense ou decompiler):
+            //   candle.PriceLevels
+            //   candle.GetAllPriceLevels()
+            //   candle.FootPrint          (se FootPrint for IEnumerable<PriceVolumeInfo>)
+            //   candle.Levels
+            //   candle.ClusterData
+            var levels = candle.PriceLevels;  // ⚠ VERIFICAR
+
+            if (levels == null)
+                return;
+
+            // Conjunto de preços com pelo menos um trade (bid > 0 ou ask > 0)
+            var hasVolume = new HashSet<decimal>();
+            foreach (var pvi in levels)
             {
-                decimal bid = 0m;
-                decimal ask = 0m;
-
-                // ⚠ VERIFICAR: nome e assinatura exactos do método.
-                // As opções mais prováveis no SDK 10 são:
-                //
-                //  Opção 1 — método com enum VolumeType:
-                //      bid = candle.GetVolume(price, VolumeType.Bid);
-                //      ask = candle.GetVolume(price, VolumeType.Ask);
-                //
-                //  Opção 2 — métodos separados:
-                //      bid = candle.GetBidVolume(price);
-                //      ask = candle.GetAskVolume(price);
-                //
-                //  Opção 3 — via PriceVolumeInfo (pode retornar null se não há registo):
-                //      var pvi = candle.GetPriceVolumeInfo(price);
-                //      bid = pvi?.Bid ?? 0m;
-                //      ask = pvi?.Ask ?? 0m;
-                //
-                //  Opção 4 — via indexador do FootPrint:
-                //      var pvi = candle.FootPrint?[price];
-                //      bid = pvi?.Bid ?? 0m;
-                //      ask = pvi?.Ask ?? 0m;
-
-                // ── Opção 1 activa: ──────────────────────────────────────────
-                bid = candle.GetVolume(price, VolumeType.Bid);  // ⚠ VERIFICAR
-                ask = candle.GetVolume(price, VolumeType.Ask);  // ⚠ VERIFICAR
-                // ────────────────────────────────────────────────────────────
-
-                if (bid == 0m && ask == 0m)
-                    _activeLines.Add((price, bar));
+                // ⚠ VERIFICAR: nomes das propriedades em PriceVolumeInfo
+                // Bid → pvi.Bid  |  pvi.BidVolume  |  pvi.VolumeBid
+                // Ask → pvi.Ask  |  pvi.AskVolume  |  pvi.VolumeAsk
+                // Price → pvi.Price  |  pvi.Level  |  pvi.PriceLevel
+                if (pvi.Bid > 0m || pvi.Ask > 0m)
+                    hasVolume.Add(pvi.Price);  // ⚠ VERIFICAR: pvi.Price
             }
 
-            // ════════════════════════════════════════════════════════════════
-            //  ABORDAGEM B  (comentada — alternativa via colecção de levels)
-            //  Se o SDK expuser uma propriedade/método que devolva todos os
-            //  price levels do footprint como colecção, descomente esta secção
-            //  e comente o loop da Abordagem A acima.
-            //
-            //  var levels = candle.GetAllLevels();             // ⚠ VERIFICAR
-            //               // outros nomes possíveis:
-            //               // candle.FootPrint.GetAllLevels()
-            //               // candle.PriceLevels
-            //               // candle.Levels
-            //  if (levels == null) return;
-            //  foreach (var pvi in levels)
-            //  {
-            //      // ⚠ VERIFICAR: nomes das propriedades Bid/Ask/Price
-            //      if (pvi.Bid == 0m && pvi.Ask == 0m)
-            //          _activeLines.Add((pvi.Price, bar));
-            //  }
-            //
-            //  Nota: se GetAllLevels() só devolver levels com volume > 0,
-            //  esta abordagem NÃO detectará zero prints.  Nesse caso usar
-            //  a Abordagem A.
-            // ════════════════════════════════════════════════════════════════
+            // Se não há nenhum tick com volume, a barra ainda não tem dados
+            // de footprint (ex: barra em formação sem trades) — não processar
+            if (hasVolume.Count == 0)
+                return;
+
+            // Ticks no range sem volume → Zero Prints
+            for (decimal price = low; price <= high; price += tickSize)
+            {
+                if (!hasVolume.Contains(price))
+                    _activeLines.Add((price, bar));
+            }
         }
 
         // ── Rendering ─────────────────────────────────────────────────────────
@@ -236,11 +217,14 @@ namespace ZeroPrintIndicator
             // Possibilidades:
             //   new RenderPen(Color color, int width)
             //   new RenderPen(Color color, float width)
-            //   new RenderPen(color.ToArgb(), width)
             var pen = new RenderPen(_corLinha, _espessura); // ⚠ VERIFICAR
 
-            int clipLeft  = context.ClipRectangle.Left;
-            int clipRight = context.ClipRectangle.Right;
+            // RenderContext não expõe ClipRectangle directamente no SDK 10.
+            // Usamos uma largura grande (100 000 px) para linhas ilimitadas;
+            // o renderer clipa automaticamente à área visível.
+            // ⚠ VERIFICAR: se o SDK expuser context.Clip, context.Bounds ou
+            // ChartInfo.Region, substituir o valor abaixo pelo Right dessa área.
+            const int LargeRight = 100_000;
 
             foreach (var line in _activeLines)
             {
@@ -249,28 +233,14 @@ namespace ZeroPrintIndicator
                 int x1 = (int)ChartInfo.GetXByBar(line.OriginBar);  // ⚠ VERIFICAR
                 int y  = (int)ChartInfo.GetYByPrice(line.Price);     // ⚠ VERIFICAR
 
-                int x2;
-                if (_limitarRange)
-                {
-                    int endBar = line.OriginBar + _maxCandles;
-                    x2 = (int)ChartInfo.GetXByBar(endBar);           // ⚠ VERIFICAR
-                }
-                else
-                {
-                    x2 = clipRight;
-                }
-
-                // Ignorar linhas completamente fora da área visível
-                if (x2 < clipLeft || x1 > clipRight)
-                    continue;
-
-                int drawX1 = Math.Max(x1, clipLeft);
-                int drawX2 = Math.Min(x2, clipRight);
+                int x2 = _limitarRange
+                    ? (int)ChartInfo.GetXByBar(line.OriginBar + _maxCandles) // ⚠ VERIFICAR
+                    : x1 + LargeRight;
 
                 // ⚠ VERIFICAR: assinatura de DrawLine no RenderContext:
                 //   context.DrawLine(pen, x1, y, x2, y)
                 //   context.DrawLine(pen, new Point(x1, y), new Point(x2, y))
-                context.DrawLine(pen, drawX1, y, drawX2, y); // ⚠ VERIFICAR
+                context.DrawLine(pen, x1, y, x2, y); // ⚠ VERIFICAR
             }
         }
     }

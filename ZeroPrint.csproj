@@ -13,6 +13,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- System.Drawing.Color, DashStyle e tipos afins (dependência interna de RenderPen) -->
+    <PackageReference Include="System.Drawing.Common" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!--
       DLLs do ATAS Platform SDK 10.
       Private=false → não são copiadas para a pasta de output (já estão instaladas
